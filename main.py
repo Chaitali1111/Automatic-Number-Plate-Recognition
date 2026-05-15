@@ -1,55 +1,77 @@
 import streamlit as st
-import easyocr
 import cv2
+import easyocr
 import numpy as np
+from ultralytics import YOLO
 import re
 
+# Title
 st.title("Automatic Number Plate Recognition")
 
+# Load YOLO model
+model = YOLO("weights/best.pt")
+
+# OCR reader
+reader = easyocr.Reader(['en'])
+
+# Upload image
 uploaded_file = st.file_uploader(
     "Upload Car Image",
-    type=['png', 'jpg', 'jpeg']
+    type=["jpg", "png", "jpeg"]
 )
 
 if uploaded_file is not None:
 
-    file_bytes = np.asarray(
-        bytearray(uploaded_file.read()),
-        dtype=np.uint8
-    )
+    # Read image
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    image = cv2.imdecode(file_bytes, 1)
 
-    img = cv2.imdecode(file_bytes, 1)
-
+    # Show uploaded image
     st.image(
-        cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+        cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
         caption="Uploaded Image"
     )
 
-    # Crop plate manually
-    plate = img[190:260, 220:400]
+    # Detect plate
+    results = model(image)
 
-    st.image(
-        cv2.cvtColor(plate, cv2.COLOR_BGR2RGB),
-        caption="Detected Plate"
-    )
+    for result in results:
+        boxes = result.boxes.xyxy.cpu().numpy()
 
-    reader = easyocr.Reader(['en'])
+        for box in boxes:
 
-    result = reader.readtext(plate)
+            x1, y1, x2, y2 = map(int, box)
 
-    if len(result) > 0:
+            # Crop plate
+            plate = image[y1:y2, x1:x2]
 
-        text = result[0][1]
+            # Safety check
+            if plate is None or plate.size == 0:
+                st.error("Number plate not detected properly")
+                st.stop()
 
-        clean_text = re.sub(
-            r'[^A-Z0-9]',
-            '',
-            text
-        )
+            # Show detected plate
+            st.image(
+                cv2.cvtColor(plate, cv2.COLOR_BGR2RGB),
+                caption="Detected Plate"
+            )
 
-        st.success(
-            f"Detected Number Plate: {clean_text}"
-        )
+            # OCR
+            ocr_result = reader.readtext(plate)
 
-    else:
-        st.error("No Number Plate Detected")
+            if len(ocr_result) > 0:
+
+                text = ocr_result[0][1]
+
+                # Clean text
+                clean_text = re.sub(r'[^A-Z0-9]', '', text)
+
+                # Remove unwanted chars
+                clean_text = clean_text.replace("B", "")
+                clean_text = clean_text.replace("1", "")
+
+                # Final output
+                st.success(f"Detected Number Plate: {clean_text}")
+
+            else:
+                st.warning("Text not detected")
